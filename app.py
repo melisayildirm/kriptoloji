@@ -1,0 +1,65 @@
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
+from crypto_algorithms import *
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app)
+
+received_message = ""
+
+@app.route('/')
+def home():
+    return render_template('home.html')
+
+@app.route('/client')
+def client_page():
+    return render_template('client.html')
+
+@app.route('/server')
+def server_page():
+    return render_template('server.html', message=received_message)
+
+# ---------------- SocketIO Events ----------------
+@socketio.on('send_message')
+def handle_send_message(data):
+    global received_message
+    message = data['message']
+    algo = data['algo']
+    key = data.get('key', '')
+
+    if algo == "Caesar":
+        encrypted = caesar_encrypt(message)
+    elif algo == "Vigenere":
+        encrypted = vigenere_encrypt(message, key)
+    elif algo == "Substitution":
+        encrypted = substitution_encrypt(message, key)
+    elif algo == "Affine":
+        encrypted = affine_encrypt(message)
+    else:
+        encrypted = message
+
+    received_message = encrypted
+    emit('receive_message', {'message': encrypted}, broadcast=True)
+
+@socketio.on('decrypt_message')
+def handle_decrypt_message(data):
+    global received_message
+    algo = data['algo']
+    key = data.get('key', '')
+
+    if algo == "Caesar":
+        decrypted = caesar_decrypt(received_message)
+    elif algo == "Vigenere":
+        decrypted = vigenere_decrypt(received_message, key)
+    elif algo == "Substitution":
+        decrypted = substitution_decrypt(received_message, key)
+    elif algo == "Affine":
+        decrypted = affine_decrypt(received_message)
+    else:
+        decrypted = received_message
+
+    emit('receive_decrypted', {'decrypted': decrypted}, broadcast=True)
+
+if __name__ == '__main__':
+    socketio.run(app, debug=True)

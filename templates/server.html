@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sunucu</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h2>Sunucu (Mesaj Al & Deşifre Et)</h2>
+        <label>Gelen Şifreli Mesaj:</label>
+        <div class="encrypted" id="received">{{ message }}</div>
+
+        <label>Anahtar (Vigenere/Substitution için):</label>
+        <input type="text" id="key">
+
+        <label>Algoritma:</label>
+        <select id="algo">
+            <option value="Caesar">Caesar</option>
+            <option value="Vigenere">Vigenere</option>
+            <option value="Substitution">Substitution</option>
+            <option value="Affine">Affine</option>
+        </select>
+
+        <button onclick="decryptMessage()">Deşifre Et</button>
+        <div class="decrypted" id="decrypted"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        const receivedDiv = document.getElementById('received');
+        const decryptedDiv = document.getElementById('decrypted');
+
+        socket.on('receive_message', (data) => {
+            receivedDiv.innerText = data.message;
+            decryptedDiv.innerText = "";
+        });
+
+        function decryptMessage() {
+            const key = document.getElementById('key').value;
+            const algo = document.getElementById('algo').value;
+            socket.emit('decrypt_message', {key, algo});
+        }
+
+        socket.on('receive_decrypted', (data) => {
+            decryptedDiv.innerText = data.decrypted;
+        });
+    </script>
+</body>
+</html>

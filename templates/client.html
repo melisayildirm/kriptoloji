@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>İstemci</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h2>İstemci (Mesaj Gönder)</h2>
+        <label>Mesaj:</label>
+        <input type="text" id="message">
+        
+        <label>Anahtar (Vigenere/Substitution için):</label>
+        <input type="text" id="key">
+        
+        <label>Algoritma:</label>
+        <select id="algo">
+            <option value="Caesar">Caesar</option>
+            <option value="Vigenere">Vigenere</option>
+            <option value="Substitution">Substitution</option>
+            <option value="Affine">Affine</option>
+        </select>
+
+        <button onclick="sendMessage()">Şifrele ve Gönder</button>
+        <div class="encrypted" id="encrypted"></div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        function sendMessage() {
+            const message = document.getElementById('message').value;
+            const key = document.getElementById('key').value;
+            const algo = document.getElementById('algo').value;
+
+            if (!message) return alert("Mesaj boş olamaz!");
+
+            socket.emit('send_message', {message, key, algo});
+            document.getElementById('encrypted').innerText = "Mesaj Gönderildi!";
+            document.getElementById('message').value = "";
+        }
+    </script>
+</body>
+</html>

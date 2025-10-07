@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Ana Sayfa</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="home-container">
+        <h1>Kriptoloji Projesi</h1>
+        <p>İstemci veya Sunucu tarafına geçmek için seçim yapın.</p>
+        <div class="home-buttons">
+            <a class="home-btn" href="/client">İstemci</a>
+            <a class="home-btn" href="/server">Sunucu</a>
+        </div>
+    </div>
+</body>
+</html>
