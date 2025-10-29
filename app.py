@@ -42,6 +42,12 @@ def handle_send_message(data):
         except:
             rails = 3
         encrypted = rail_fence_encrypt(message, rails)
+    elif algo == "Route Cipher":
+        try:
+            width = int(key) if key and key.isdigit() and int(key) >= 2 else 5
+        except:
+            width = 5
+        encrypted = route_encrypt(message, width=width)
     else:
         encrypted = message
 
@@ -68,6 +74,12 @@ def handle_decrypt_message(data):
         except:
             rails = 3
         decrypted = rail_fence_decrypt(received_message, rails)
+    elif algo == "Route Cipher":
+        try:
+            width = int(key) if key and key.isdigit() and int(key) >= 2 else 5
+        except:
+            width = 5
+        decrypted = route_decrypt(received_message, width=width)
     else:
         decrypted = received_message
 
