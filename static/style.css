@@ -49,4 +49,23 @@ button:hover { background:#2575fc; transform:translateY(-2px); }
 
 .home-btn:hover { background:#2575fc; transform:translateY(-3px); }
 
+/* Ana sayfaya dön butonu */
+.back-home-btn {
+    display: block;
+    margin-top: 20px;
+    padding: 12px 20px;
+    background: #6c757d;
+    color: white;
+    font-weight: bold;
+    border-radius: 10px;
+    text-decoration: none;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.back-home-btn:hover {
+    background: #5a6268;
+    transform: translateY(-2px);
+}
+
 @media(max-width:600px){ .container, .home-container { width:90%; padding:20px; } }
