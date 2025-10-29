@@ -36,6 +36,12 @@ def handle_send_message(data):
         encrypted = substitution_encrypt(message, key)
     elif algo == "Affine":
         encrypted = affine_encrypt(message)
+    elif algo == "Rail Fence":
+        try:
+            rails = int(key) if key and key.isdigit() and int(key) >= 2 else 3
+        except:
+            rails = 3
+        encrypted = rail_fence_encrypt(message, rails)
     else:
         encrypted = message
 
@@ -56,6 +62,12 @@ def handle_decrypt_message(data):
         decrypted = substitution_decrypt(received_message, key)
     elif algo == "Affine":
         decrypted = affine_decrypt(received_message)
+    elif algo == "Rail Fence":
+        try:
+            rails = int(key) if key and key.isdigit() and int(key) >= 2 else 3
+        except:
+            rails = 3
+        decrypted = rail_fence_decrypt(received_message, rails)
     else:
         decrypted = received_message
 

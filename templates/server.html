@@ -12,8 +12,8 @@
         <label>Gelen Şifreli Mesaj:</label>
         <div class="encrypted" id="received">{{ message }}</div>
 
-        <label>Anahtar (Vigenere/Substitution için):</label>
-        <input type="text" id="key">
+        <label>Anahtar (Vigenere/Substitution/Rail Fence için):</label>
+        <input type="text" id="key" placeholder="Rail Fence için ray sayısı (örn: 3)">
 
         <label>Algoritma:</label>
         <select id="algo">
@@ -21,6 +21,7 @@
             <option value="Vigenere">Vigenere</option>
             <option value="Substitution">Substitution</option>
             <option value="Affine">Affine</option>
+            <option value="Rail Fence">Rail Fence</option>
         </select>
 
         <button onclick="decryptMessage()">Deşifre Et</button>

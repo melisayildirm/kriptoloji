@@ -80,3 +80,51 @@ def affine_decrypt(text, a=5, b=8):
         else:
             result += char
     return result
+
+
+# --- 5. Rail Fence Cipher ---
+def rail_fence_encrypt(text, rails=3):
+    if rails < 2:
+        return text
+
+    rows = ["" for _ in range(rails)]
+    cycle = 2 * (rails - 1)
+
+    for i, ch in enumerate(text):
+        t = i % cycle
+        row = t if t < rails else cycle - t
+        rows[row] += ch
+
+    return "".join(rows)
+
+
+def rail_fence_decrypt(text, rails=3):
+    if rails < 2:
+        return text
+
+    n = len(text)
+    cycle = 2 * (rails - 1)
+
+    pattern = []
+    for i in range(n):
+        t = i % cycle
+        row = t if t < rails else cycle - t
+        pattern.append(row)
+
+    counts = [0] * rails
+    for r in pattern:
+        counts[r] += 1
+
+    parts = []
+    idx = 0
+    for c in counts:
+        parts.append(list(text[idx:idx + c]))
+        idx += c
+
+    result = []
+    ptr = [0] * rails
+    for r in pattern:
+        result.append(parts[r][ptr[r]])
+        ptr[r] += 1
+
+    return "".join(result)
