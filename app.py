@@ -48,6 +48,8 @@ def handle_send_message(data):
         except:
             width = 5
         encrypted = route_encrypt(message, width=width)
+    elif algo == "Columnar Transposition":
+        encrypted = columnar_encrypt(message, key if key else "truva")
     else:
         encrypted = message
 
@@ -80,6 +82,8 @@ def handle_decrypt_message(data):
         except:
             width = 5
         decrypted = route_decrypt(received_message, width=width)
+    elif algo == "Columnar Transposition":
+        decrypted = columnar_decrypt(received_message, key if key else "truva")
     else:
         decrypted = received_message
 

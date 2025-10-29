@@ -258,3 +258,117 @@ def route_decrypt(text, width=5, direction='clockwise', fill_char='X'):
         decrypted = decrypted[:-1]
     
     return decrypted
+
+
+# --- 7. Columnar Transposition Cipher ---
+def columnar_encrypt(text, key, fill_char='*'):
+    """
+    Columnar Transposition (Sütunlu Kaydırma) - Anahtar ile kolon sıralaması
+    
+    Args:
+        text: Şifrelenecek metin
+        key: Kolonları sıralamak için anahtar (örn: "truva")
+        fill_char: Boşlukları doldurmak için kullanılacak karakter (default: '*')
+    
+    Returns:
+        Şifrelenmiş metin
+    """
+    # Metni temizle ve büyük harfe çevir
+    clean_text = ''.join(text.split()).upper()
+    key = key.upper()
+    
+    if not key or not clean_text:
+        return clean_text
+    
+    # Anahtarın karakterlerini sırala ve numaralandır (alfabetik sıra)
+    key_chars = list(key)
+    # Aynı karakterler için indeks farkı oluştur (ilk karşılaşılan daha küçük numara alır)
+    sorted_chars = sorted(enumerate(key_chars), key=lambda x: (x[1], x[0]))
+    
+    # Kolon numaralarını oluştur (1'den başlayarak)
+    column_order = [0] * len(key)
+    for i, (orig_idx, char) in enumerate(sorted_chars):
+        column_order[orig_idx] = i + 1
+    
+    # Grid'i oluştur
+    cols = len(key)
+    rows = (len(clean_text) + cols - 1) // cols  # Yuvarlama yukarı
+    
+    # Grid'i doldur
+    grid = []
+    text_idx = 0
+    for i in range(rows):
+        row = []
+        for j in range(cols):
+            if text_idx < len(clean_text):
+                row.append(clean_text[text_idx])
+                text_idx += 1
+            else:
+                row.append(fill_char)
+        grid.append(row)
+    
+    # Kolonları sıralı numarasına göre oku
+    result = []
+    for order in range(1, cols + 1):
+        col_idx = column_order.index(order)
+        for row in grid:
+            result.append(row[col_idx])
+    
+    return ''.join(result)
+
+
+def columnar_decrypt(text, key, fill_char='*'):
+    """
+    Columnar Transposition ile şifrelenmiş metni çözer
+    
+    Args:
+        text: Şifrelenmiş metin
+        key: Şifreleme sırasında kullanılan anahtar
+        fill_char: Boşlukları doldurmak için kullanılan karakter
+    
+    Returns:
+        Çözülmüş metin
+    """
+    text = text.upper()
+    key = key.upper()
+    
+    if not key or not text:
+        return text
+    
+    # Anahtarın kolon sıralamasını belirle
+    key_chars = list(key)
+    sorted_chars = sorted(enumerate(key_chars), key=lambda x: (x[1], x[0]))
+    
+    column_order = [0] * len(key)
+    for i, (orig_idx, char) in enumerate(sorted_chars):
+        column_order[orig_idx] = i + 1
+    
+    # Grid boyutlarını hesapla
+    cols = len(key)
+    rows = (len(text) + cols - 1) // cols
+    total_cells = rows * cols
+    
+    # Grid'i oluştur
+    grid = [[''] * cols for _ in range(rows)]
+    
+    # Şifrelenmiş metni grid'e yerleştir (kolon sırasına göre)
+    text_idx = 0
+    for order in range(1, cols + 1):
+        col_idx = column_order.index(order)
+        for row_idx in range(rows):
+            if text_idx < len(text):
+                grid[row_idx][col_idx] = text[text_idx]
+                text_idx += 1
+    
+    # Grid'den metni oku (satır satır)
+    result = []
+    for row in grid:
+        result.extend(row)
+    
+    decrypted = ''.join(result)
+    
+    # Sonundaki fill_char karakterlerini kaldır
+    while decrypted and decrypted[-1] == fill_char:
+        decrypted = decrypted[:-1]
+    
+    return decrypted
