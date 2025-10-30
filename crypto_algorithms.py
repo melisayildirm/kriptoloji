@@ -372,3 +372,193 @@ def columnar_decrypt(text, key, fill_char='*'):
         decrypted = decrypted[:-1]
     
     return decrypted
+
+
+# --- 8. Polybius Cipher ---
+def polybius_encrypt(text, separator=''):
+    """
+    Polybius Cipher - Her harfi satır ve sütun numarasına dönüştürür
+    
+    Args:
+        text: Şifrelenecek metin
+        separator: Sayılar arası ayırıcı karakter (default: '', örn: '-' veya ' ')
+    
+    Returns:
+        Şifrelenmiş metin (sayı dizisi)
+    """
+    # Polybius Square: 5x5 grid
+    # i ve j aynı hücrede (2,4)
+    polybius_square = {
+        'A': '11', 'B': '12', 'C': '13', 'D': '14', 'E': '15',
+        'F': '21', 'G': '22', 'H': '23', 'I': '24', 'J': '24',
+        'K': '25', 'L': '31', 'M': '32', 'N': '33', 'O': '34',
+        'P': '35', 'Q': '41', 'R': '42', 'S': '43', 'T': '44',
+        'U': '45', 'V': '51', 'W': '52', 'X': '53', 'Y': '54',
+        'Z': '55'
+    }
+    
+    text = text.upper()
+    result = []
+    
+    for char in text:
+        if char.isalpha():
+            result.append(polybius_square.get(char, ''))
+        elif char == ' ':
+            continue  # Boşlukları atla
+        else:
+            # Diğer karakterleri koru (opsiyonel)
+            continue
+    
+    return separator.join(result)
+
+
+def polybius_decrypt(text, separator=''):
+    """
+    Polybius Cipher ile şifrelenmiş metni çözer
+    
+    Args:
+        text: Şifrelenmiş metin (sayı dizisi)
+        separator: Sayılar arası ayırıcı karakter (aynı olmalı)
+    
+    Returns:
+        Çözülmüş metin
+    """
+    # Polybius Square'in tersi
+    inverse_polybius = {
+        '11': 'A', '12': 'B', '13': 'C', '14': 'D', '15': 'E',
+        '21': 'F', '22': 'G', '23': 'H', '24': 'I',  # I ve J aynı
+        '25': 'K', '31': 'L', '32': 'M', '33': 'N', '34': 'O',
+        '35': 'P', '41': 'Q', '42': 'R', '43': 'S', '44': 'T',
+        '45': 'U', '51': 'V', '52': 'W', '53': 'X', '54': 'Y',
+        '55': 'Z'
+    }
+    
+    result = []
+    
+    # Ayırıcı varsa böl, yoksa her 2 karakteri al
+    if separator:
+        numbers = text.split(separator)
+    else:
+        numbers = [text[i:i+2] for i in range(0, len(text), 2)]
+    
+    for num in numbers:
+        # Sadece sayı olanları çöz
+        if num.isdigit() and len(num) == 2:
+            letter = inverse_polybius.get(num, '')
+            if letter:
+                result.append(letter)
+    
+    return ''.join(result)
+
+
+# --- 9. Pigpen Cipher ---
+def pigpen_encrypt(text):
+    """
+    Pigpen Cipher - Mason şifresi, harfleri sembollere dönüştürür
+    
+    Args:
+        text: Şifrelenecek metin
+    
+    Returns:
+        Şifrelenmiş metin (sembol dizisi)
+    """
+    # Pigpen sembolleri: her harf için benzersiz ASCII tabanlı sembol
+    pigpen_symbols = {
+        # Grid 1 (3x3 Kare)
+        'A': 'L',   # Sol ve üst köşe
+        'B': 'R',   # Sağ ve üst köşe
+        'C': 'BL',  # Sol ve alt köşe
+        'D': 'BR',  # Sağ ve alt köşe
+        'E': 'T',   # Üst kenar
+        'F': 'B',   # Alt kenar
+        'G': 'LS',  # Sol kenar
+        'H': 'RS',  # Sağ kenar
+        'I': 'S',   # Tam kare
+        
+        # Grid 2 (3x3 Kare + nokta)
+        'J': 'L.',  # Sol ve üst köşe + nokta
+        'K': 'R.',  # Sağ ve üst köşe + nokta
+        'L': 'BL.', # Sol ve alt köşe + nokta
+        'M': 'BR.', # Sağ ve alt köşe + nokta
+        'N': 'T.',  # Üst kenar + nokta
+        'O': 'B.',  # Alt kenar + nokta
+        'P': 'LS.', # Sol kenar + nokta
+        'Q': 'RS.', # Sağ kenar + nokta
+        'R': 'S.',  # Tam kare + nokta
+        
+        # Grid 3 (X şekli)
+        'S': '/',   # Sol üst X
+        'T': '\\',  # Sağ üst X
+        'U': 'LU',  # Sol alt X
+        'V': 'RU',  # Sağ alt X
+        
+        # Grid 4 (X + nokta)
+        'W': '/.',  # Sol üst X + nokta
+        'X': '\\.', # Sağ üst X + nokta
+        'Y': 'LU.', # Sol alt X + nokta
+        'Z': 'RU.', # Sağ alt X + nokta
+    }
+    
+    text = text.upper()
+    result = []
+    
+    for char in text:
+        if char.isalpha():
+            symbol = pigpen_symbols.get(char, char)
+            result.append(symbol)
+        elif char == ' ':
+            result.append(' ')
+        else:
+            result.append(char)
+    
+    return ''.join(result)
+
+
+def pigpen_decrypt(text):
+    """
+    Pigpen Cipher ile şifrelenmiş metni çözer
+    
+    Args:
+        text: Şifrelenmiş metin (sembol dizisi)
+    
+    Returns:
+        Çözülmüş metin
+    """
+    # Pigpen sembollerinden harfe dönüştürme (ASCII tabanlı)
+    symbol_to_letter = {
+        'L': 'A', 'R': 'B', 'BL': 'C', 'BR': 'D', 'T': 'E',
+        'B': 'F', 'LS': 'G', 'RS': 'H', 'S': 'I',
+        'L.': 'J', 'R.': 'K', 'BL.': 'L', 'BR.': 'M', 'T.': 'N',
+        'B.': 'O', 'LS.': 'P', 'RS.': 'Q', 'S.': 'R',
+        '/': 'S', '\\': 'T', 'LU': 'U', 'RU': 'V',
+        '/.': 'W', '\\.': 'X', 'LU.': 'Y', 'RU.': 'Z',
+    }
+    
+    result = []
+    i = 0
+    
+    while i < len(text):
+        char = text[i]
+        
+        if char == ' ':
+            result.append(' ')
+            i += 1
+            continue
+        
+        # 1-5 karakterlik sembolleri kontrol et
+        found = False
+        for length in range(5, 0, -1):
+            if i + length <= len(text):
+                symbol = text[i:i+length]
+                if symbol in symbol_to_letter:
+                    result.append(symbol_to_letter[symbol])
+                    i += length
+                    found = True
+                    break
+        
+        if not found:
+            # Sembol bulunamadı, orijinal karakteri koru
+            result.append(char)
+            i += 1
+    
+    return ''.join(result)

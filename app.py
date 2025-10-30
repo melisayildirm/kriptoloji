@@ -50,6 +50,10 @@ def handle_send_message(data):
         encrypted = route_encrypt(message, width=width)
     elif algo == "Columnar Transposition":
         encrypted = columnar_encrypt(message, key if key else "truva")
+    elif algo == "Polybius":
+        encrypted = polybius_encrypt(message)
+    elif algo == "Pigpen":
+        encrypted = pigpen_encrypt(message)
     else:
         encrypted = message
 
@@ -84,6 +88,10 @@ def handle_decrypt_message(data):
         decrypted = route_decrypt(received_message, width=width)
     elif algo == "Columnar Transposition":
         decrypted = columnar_decrypt(received_message, key if key else "truva")
+    elif algo == "Polybius":
+        decrypted = polybius_decrypt(received_message)
+    elif algo == "Pigpen":
+        decrypted = pigpen_decrypt(received_message)
     else:
         decrypted = received_message
 
