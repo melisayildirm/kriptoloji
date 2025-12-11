@@ -13,7 +13,7 @@
         <div class="encrypted" id="received">{{ message }}</div>
 
         <label>Anahtar:</label>
-        <input type="text" id="key" placeholder="Vigenere/Substitution: anahtar kelime, Rail Fence: ray sayısı (örn: 3), Route Cipher: genişlik (örn: 5), Columnar Transposition: anahtar (örn: truva)">
+        <input type="text" id="key" placeholder="Vigenere/Substitution: anahtar kelime, Rail Fence: ray sayısı (örn: 3), Route Cipher: genişlik (örn: 5), Columnar Transposition: anahtar (örn: truva), Hill: matris (örn: 3,3,2,5), DES: 8 karakterlik anahtar (örn: 12345678)">
 
         <label>Algoritma:</label>
         <select id="algo">
@@ -26,6 +26,8 @@
             <option value="Columnar Transposition">Columnar Transposition</option>
             <option value="Polybius">Polybius</option>
             <option value="Pigpen">Pigpen</option>
+            <option value="Hill">Hill</option>
+            <option value="DES">DES</option>
         </select>
 
         <button onclick="decryptMessage()">Deşifre Et</button>
