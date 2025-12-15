@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+from Crypto.Cipher import AES
+from Crypto.Hash import SHA256
+from Crypto.Random import get_random_bytes
+from Crypto.Util.Padding import pad, unpad
+import base64
 
 import string
 
@@ -1031,3 +1036,32 @@ def des_decrypt(ciphertext_hex, key):
     # Tüm blokları birleştir ve padding'i kaldır
     result = ''.join(decrypted_blocks)
     return _unpad_text(result)
+
+def _derive_aes_key(key: str) -> bytes:
+    """
+    Kullanıcının girdiği anahtardan 16 byte AES anahtarı üretir
+    """
+    h = SHA256.new(key.encode("utf-8")).digest()
+    return h[:16]  # AES-128
+
+
+def aes_encrypt(plaintext: str, key: str) -> str:
+    aes_key = _derive_aes_key(key)
+    iv = get_random_bytes(16)
+
+    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+    ciphertext = cipher.encrypt(pad(plaintext.encode("utf-8"), AES.block_size))
+
+    return base64.b64encode(iv + ciphertext).decode("utf-8")
+
+
+def aes_decrypt(ciphertext: str, key: str) -> str:
+    raw = base64.b64decode(ciphertext)
+    iv = raw[:16]
+    data = raw[16:]
+
+    aes_key = _derive_aes_key(key)
+    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+
+    plaintext = unpad(cipher.decrypt(data), AES.block_size)
+    return plaintext.decode("utf-8")
