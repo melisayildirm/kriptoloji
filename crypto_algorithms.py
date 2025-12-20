@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from Crypto.Cipher import AES
+from Crypto.Cipher import DES
 from Crypto.Hash import SHA256
 from Crypto.Random import get_random_bytes
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Util.Padding import pad, unpad
 import base64
 
@@ -1065,3 +1068,94 @@ def aes_decrypt(ciphertext: str, key: str) -> str:
 
     plaintext = unpad(cipher.decrypt(data), AES.block_size)
     return plaintext.decode("utf-8")
+
+# --- DES (Library) CBC + Base64 ---
+def des_lib_encrypt(plaintext: str, key: str) -> str:
+    k = (key or "12345678").encode("utf-8")[:8].ljust(8, b"\0")
+    iv = get_random_bytes(8)
+    cipher = DES.new(k, DES.MODE_CBC, iv)
+    ct = cipher.encrypt(pad(plaintext.encode("utf-8"), 8))
+    return base64.b64encode(iv + ct).decode("utf-8")
+
+def des_lib_decrypt(ciphertext_b64: str, key: str) -> str:
+    raw = base64.b64decode(ciphertext_b64)
+    iv, ct = raw[:8], raw[8:]
+    k = (key or "12345678").encode("utf-8")[:8].ljust(8, b"\0")
+    cipher = DES.new(k, DES.MODE_CBC, iv)
+    pt = unpad(cipher.decrypt(ct), 8)
+    return pt.decode("utf-8")
+
+
+# --- RSA (Library) OAEP + Base64 ---
+def rsa_generate_keypair(bits: int = 2048):
+    key = RSA.generate(bits)
+    private_pem = key.export_key().decode("utf-8")
+    public_pem = key.publickey().export_key().decode("utf-8")
+    return public_pem, private_pem
+
+def rsa_encrypt_text(public_pem: str, plaintext: str) -> str:
+    pub = RSA.import_key(public_pem.encode("utf-8"))
+    cipher = PKCS1_OAEP.new(pub)  # SHA1 default
+    ct = cipher.encrypt(plaintext.encode("utf-8"))
+    return base64.b64encode(ct).decode("utf-8")
+
+def rsa_decrypt_text(private_pem: str, ciphertext_b64: str) -> str:
+    priv = RSA.import_key(private_pem.encode("utf-8"))
+    cipher = PKCS1_OAEP.new(priv)
+    ct = base64.b64decode(ciphertext_b64)
+    pt = cipher.decrypt(ct)
+    return pt.decode("utf-8")
+
+# ===============================
+# MANUAL / TOY AES (SIMPLIFIED)
+# ===============================
+
+# 4-bit S-Box (Mini AES)
+S_BOX = {
+    0x0: 0xE, 0x1: 0x4, 0x2: 0xD, 0x3: 0x1,
+    0x4: 0x2, 0x5: 0xF, 0x6: 0xB, 0x7: 0x8,
+    0x8: 0x3, 0x9: 0xA, 0xA: 0x6, 0xB: 0xC,
+    0xC: 0x5, 0xD: 0x9, 0xE: 0x0, 0xF: 0x7
+}
+
+INV_S_BOX = {v: k for k, v in S_BOX.items()}
+
+def _sub_nibbles(data):
+    return bytes((S_BOX[b >> 4] << 4 | S_BOX[b & 0x0F]) for b in data)
+
+def _inv_sub_nibbles(data):
+    return bytes((INV_S_BOX[b >> 4] << 4 | INV_S_BOX[b & 0x0F]) for b in data)
+
+def _xor_bytes(a, b):
+    return bytes(x ^ y for x, y in zip(a, b))
+
+def aes_manual_encrypt(plaintext: str, key: str) -> str:
+    """
+    Toy AES (2 round, simplified)
+    """
+    data = plaintext.encode("utf-8")
+    key_bytes = key.encode("utf-8").ljust(len(data), b"\0")
+
+    # Round 1
+    state = _xor_bytes(data, key_bytes)
+    state = _sub_nibbles(state)
+
+    # Round 2
+    state = _xor_bytes(state, key_bytes)
+    state = _sub_nibbles(state)
+
+    return base64.b64encode(state).decode("utf-8")
+
+def aes_manual_decrypt(ciphertext_b64: str, key: str) -> str:
+    data = base64.b64decode(ciphertext_b64)
+    key_bytes = key.encode("utf-8").ljust(len(data), b"\0")
+
+    # Inverse Round 2
+    state = _inv_sub_nibbles(data)
+    state = _xor_bytes(state, key_bytes)
+
+    # Inverse Round 1
+    state = _inv_sub_nibbles(state)
+    state = _xor_bytes(state, key_bytes)
+
+    return state.decode("utf-8", errors="ignore")

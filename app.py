@@ -10,6 +10,13 @@ socketio = SocketIO(app)
 
 received_message = ""
 
+# RSA keypair (server)
+SERVER_RSA_PUBLIC, SERVER_RSA_PRIVATE = rsa_generate_keypair(2048)
+
+# (Optional) session keys distributed via RSA
+SESSION_AES_KEY = None
+SESSION_DES_KEY = None
+
 
 def parse_hill_key(key_string):
     """
@@ -42,6 +49,31 @@ def server_page():
 
 
 # ================= SOCKET EVENTS =================
+
+@socketio.on('get_rsa_public_key')
+def get_rsa_public_key():
+    emit('rsa_public_key', {'public_key': SERVER_RSA_PUBLIC})
+
+
+@socketio.on('exchange_session_key')
+def exchange_session_key(data):
+    global SESSION_AES_KEY, SESSION_DES_KEY
+    algo = data.get('algo')
+    encrypted_key = data.get('encrypted_key', '')
+    try:
+        key_plain = rsa_decrypt_text(SERVER_RSA_PRIVATE, encrypted_key)
+    except Exception:
+        emit('key_exchange_ok', {'ok': False, 'algo': algo})
+        return
+
+    if algo == "AES":
+        # AES tarafında biz zaten string key'den 16 byte türetiyoruz, burada string saklıyoruz
+        SESSION_AES_KEY = key_plain
+    elif algo == "DES":
+        SESSION_DES_KEY = key_plain[:8]
+
+    emit('key_exchange_ok', {'ok': True, 'algo': algo})
+
 
 @socketio.on('send_message')
 def handle_send_message(data):
@@ -85,11 +117,20 @@ def handle_send_message(data):
         encrypted = hill_encrypt(message, key_matrix)
 
     elif algo == "DES":
-        des_key = key[:8] if key else "12345678"
+        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
         encrypted = des_encrypt(message, des_key)
 
+    elif algo == "DES (Library)":
+        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
+        encrypted = des_lib_encrypt(message, des_key)
+
     elif algo == "AES":
-        encrypted = aes_encrypt(message, key)
+        aes_key = key or SESSION_AES_KEY or ""
+        encrypted = aes_encrypt(message, aes_key)
+
+    elif algo == "RSA":
+        # Kütüphaneli mod: RSA ile mesaj şifreleme (demo)
+        encrypted = rsa_encrypt_text(SERVER_RSA_PUBLIC, message)
 
     else:
         encrypted = message
@@ -139,11 +180,19 @@ def handle_decrypt_message(data):
         decrypted = hill_decrypt(received_message, key_matrix)
 
     elif algo == "DES":
-        des_key = key[:8] if key else "12345678"
+        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
         decrypted = des_decrypt(received_message, des_key)
 
+    elif algo == "DES (Library)":
+        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
+        decrypted = des_lib_decrypt(received_message, des_key)
+
     elif algo == "AES":
-        decrypted = aes_decrypt(received_message, key)
+        aes_key = key or SESSION_AES_KEY or ""
+        decrypted = aes_decrypt(received_message, aes_key)
+
+    elif algo == "RSA":
+        decrypted = rsa_decrypt_text(SERVER_RSA_PRIVATE, received_message)
 
     else:
         decrypted = received_message

@@ -5,6 +5,7 @@
     <title>İstemci</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -14,6 +15,11 @@
         
         <label>Anahtar:</label>
         <input type="text" id="key" placeholder="Vigenere/Substitution: anahtar kelime, Rail Fence: ray sayısı (örn: 3), Route Cipher: genişlik (örn: 5), Columnar Transposition: anahtar (örn: truva), Hill: matris (örn: 3,3,2,5), DES: 8 karakterlik anahtar (örn: 12345678)">
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" onclick="exchangeKey('AES')">RSA ile AES Anahtarı Gönder</button>
+            <button type="button" onclick="exchangeKey('DES')">RSA ile DES Anahtarı Gönder</button>
+        </div>
         
         <label>Algoritma:</label>
         <select id="algo">
@@ -28,7 +34,10 @@
             <option value="Pigpen">Pigpen</option>
             <option value="Hill">Hill</option>
             <option value="DES">DES</option>
+            <option value="DES (Library)">DES (Library)</option>
+            <option value="RSA">RSA</option>
             <option value="AES">AES</option>
+            <option value="AES (Manual)">AES (Manual)</option>
         </select>
 
         <button onclick="sendMessage()">Şifrele ve Gönder</button>
@@ -39,6 +48,49 @@
 
     <script>
         const socket = io();
+
+        // --- RSA key exchange helpers ---
+        let rsaPublicKeyPem = null;
+
+        socket.emit('get_rsa_public_key');
+        socket.on('rsa_public_key', (data) => {
+            rsaPublicKeyPem = data.public_key;
+        });
+
+        socket.on('key_exchange_ok', (data) => {
+            if (data.ok) {
+                alert(data.algo + " anahtarı sunucuya iletildi (RSA ile).");
+            } else {
+                alert("Anahtar iletimi başarısız.");
+            }
+        });
+
+        function exchangeKey(algo) {
+            if (!rsaPublicKeyPem) return alert("RSA public key henüz gelmedi!");
+            const key = document.getElementById('key').value;
+
+            if (algo === "AES" && key.length < 16) {
+                return alert("AES için en az 16 karakterlik anahtar gir (16 byte mantığında).");
+            }
+            if (algo === "DES" && key.length < 8) {
+                return alert("DES için en az 8 karakterlik anahtar gir.");
+            }
+
+            try {
+                const publicKey = forge.pki.publicKeyFromPem(rsaPublicKeyPem);
+                // OAEP (SHA-1) -> Python'daki PKCS1_OAEP default ile uyumlu
+                const encryptedBytes = publicKey.encrypt(key, 'RSA-OAEP');
+                const encryptedB64 = forge.util.encode64(encryptedBytes);
+
+                socket.emit('exchange_session_key', {
+                    algo: algo,
+                    encrypted_key: encryptedB64
+                });
+            } catch (e) {
+                console.error(e);
+                alert("RSA şifreleme hatası: console'a bak.");
+            }
+        }
 
         function sendMessage() {
             const message = document.getElementById('message').value;
