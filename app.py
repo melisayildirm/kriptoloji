@@ -1,8 +1,23 @@
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 from crypto_algorithms import *
-from crypto_algorithms import aes_encrypt, aes_decrypt
 import math
+import ast
+import base64  # (kalsın, başka yerde kullanıyor olabilirsin)
+from crypto_algorithms import (
+    aes_user_encrypt, aes_user_decrypt,
+    aes_lib_encrypt, aes_lib_decrypt,
+    aes_manual_encrypt, aes_manual_decrypt,
+    des_encrypt, des_decrypt,
+    des_lib_encrypt, des_lib_decrypt,
+    rsa_generate_keypair, rsa_encrypt_text, rsa_decrypt_text,
+    hill_encrypt, hill_decrypt
+)
+
+aes_encrypt = aes_user_encrypt
+aes_decrypt = aes_user_decrypt
+
+RSA_PUBLIC_KEY, RSA_PRIVATE_KEY = rsa_generate_keypair()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -13,7 +28,7 @@ received_message = ""
 # RSA keypair (server)
 SERVER_RSA_PUBLIC, SERVER_RSA_PRIVATE = rsa_generate_keypair(2048)
 
-# (Optional) session keys distributed via RSA
+# Session keys distributed via RSA (Library modlar için)
 SESSION_AES_KEY = None
 SESSION_DES_KEY = None
 
@@ -56,148 +71,241 @@ def get_rsa_public_key():
 
 
 @socketio.on('exchange_session_key')
-def exchange_session_key(data):
+def handle_exchange_session_key(data):
+    """İstemciden RSA ile şifrelenmiş oturum anahtarını alır ve server tarafında saklar."""
     global SESSION_AES_KEY, SESSION_DES_KEY
-    algo = data.get('algo')
-    encrypted_key = data.get('encrypted_key', '')
     try:
-        key_plain = rsa_decrypt_text(SERVER_RSA_PRIVATE, encrypted_key)
-    except Exception:
-        emit('key_exchange_ok', {'ok': False, 'algo': algo})
-        return
+        algorithm = data.get('algorithm') or data.get('algo')
+        encrypted_key_b64 = data.get('encrypted_key')
 
-    if algo == "AES":
-        # AES tarafında biz zaten string key'den 16 byte türetiyoruz, burada string saklıyoruz
-        SESSION_AES_KEY = key_plain
-    elif algo == "DES":
-        SESSION_DES_KEY = key_plain[:8]
+        if not algorithm or not encrypted_key_b64:
+            raise ValueError("exchange_session_key verisi eksik (algorithm/encrypted_key).")
 
-    emit('key_exchange_ok', {'ok': True, 'algo': algo})
+        # ✅ Client artık base64 değil, direkt ASCII key string gönderiyor (DES=8, AES=16)
+        key_text = rsa_decrypt_text(SERVER_RSA_PRIVATE, encrypted_key_b64)
+
+        if isinstance(key_text, (bytes, bytearray)):
+            key_bytes = bytes(key_text)
+        else:
+            key_bytes = str(key_text).encode("utf-8")
+
+        if algorithm == 'AES (Library)':
+            if len(key_bytes) != 16:
+                raise ValueError('AES (Library) anahtarı 16 byte olmalıdır.')
+            SESSION_AES_KEY = key_bytes
+
+        elif algorithm == 'DES (Library)':
+            if len(key_bytes) != 8:
+                raise ValueError('DES (Library) anahtarı 8 byte olmalıdır.')
+            SESSION_DES_KEY = key_bytes
+
+        else:
+            raise ValueError('Bilinmeyen algoritma için oturum anahtarı gönderildi.')
+
+        # Client tarafı key_exchange_ok dinliyor
+        socketio.emit('key_exchange_ok', {'ok': True, 'algorithm': algorithm})
+
+    except Exception as e:
+        socketio.emit('error', {'message': f'Oturum anahtarı değişimi hatası: {str(e)}'})
+        socketio.emit('key_exchange_ok', {'ok': False, 'message': str(e)})
 
 
 @socketio.on('send_message')
 def handle_send_message(data):
     global received_message
+    try:
+        message = data.get('message', '')
+        algorithm = data.get('algorithm') or data.get('algo')
+        key = data.get('key')
 
-    message = data['message']
-    algo = data['algo']
-    key = data.get('key', '')
+        if not algorithm:
+            raise ValueError("Algoritma seçimi yok.")
 
-    if algo == "Caesar":
-        encrypted = caesar_encrypt(message)
+        # Manuel / klasik şifreler
+        if algorithm == 'Caesar':
+            if key is None or key == '':
+                raise ValueError('Caesar için anahtar (kaydırma sayısı) zorunludur.')
+            encrypted = caesar_encrypt(message, int(key))
 
-    elif algo == "Vigenere":
-        encrypted = vigenere_encrypt(message, key)
+        elif algorithm == 'Vigenere':
+            if not key:
+                raise ValueError('Vigenere için anahtar kelime zorunludur.')
+            encrypted = vigenere_encrypt(message, key)
 
-    elif algo == "Substitution":
-        encrypted = substitution_encrypt(message, key)
+        elif algorithm == 'Substitution':
+            if not key:
+                raise ValueError('Substitution için anahtar kelime zorunludur.')
+            encrypted = substitution_encrypt(message, key)
 
-    elif algo == "Affine":
-        encrypted = affine_encrypt(message)
+        elif algorithm == 'Affine':
+            if not key:
+                raise ValueError('Affine için anahtar zorunludur. Örn: 5,8')
+            a, b = map(int, key.split(','))
+            encrypted = affine_encrypt(message, a, b)
 
-    elif algo == "Rail Fence":
-        rails = int(key) if key.isdigit() and int(key) >= 2 else 3
-        encrypted = rail_fence_encrypt(message, rails)
+        elif algorithm == 'Rail Fence':
+            if not key:
+                raise ValueError('Rail Fence için ray sayısı zorunludur.')
+            encrypted = rail_fence_encrypt(message, int(key))
 
-    elif algo == "Route Cipher":
-        width = int(key) if key.isdigit() and int(key) >= 2 else 5
-        encrypted = route_encrypt(message, width=width)
+        elif algorithm == 'Route Cipher':
+            if not key:
+                raise ValueError('Route Cipher için anahtar zorunludur.')
+            encrypted = route_encrypt(message, key)
 
-    elif algo == "Columnar Transposition":
-        encrypted = columnar_encrypt(message, key if key else "truva")
+        elif algorithm == 'Columnar Transposition':
+            if not key:
+                raise ValueError('Columnar Transposition için anahtar zorunludur.')
+            encrypted = columnar_encrypt(message, key)
 
-    elif algo == "Polybius":
-        encrypted = polybius_encrypt(message)
+        elif algorithm == 'Polybius':
+            if not key:
+                raise ValueError('Polybius için anahtar zorunludur.')
+            encrypted = polybius_encrypt(message, key)
 
-    elif algo == "Pigpen":
-        encrypted = pigpen_encrypt(message)
+        elif algorithm == 'Pigpen':
+            encrypted = pigpen_encrypt(message)
 
-    elif algo == "Hill":
-        key_matrix = parse_hill_key(key) if key else [[3, 3], [2, 5]]
-        encrypted = hill_encrypt(message, key_matrix)
+        elif algorithm == 'Hill':
+            if not key:
+                raise ValueError('Hill için anahtar matrisi zorunludur. Örn: [2,2,3,3]')
+            key_matrix = ast.literal_eval(key)
+            encrypted = hill_encrypt(message, key_matrix)
 
-    elif algo == "DES":
-        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
-        encrypted = des_encrypt(message, des_key)
+        # --- DES / AES MODLARI ---
+        elif algorithm == 'DES (Manual)':
+            if not key:
+                raise ValueError('DES (Manual) için 8 byte anahtar zorunludur.')
+            encrypted = des_encrypt(message, key)
 
-    elif algo == "DES (Library)":
-        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
-        encrypted = des_lib_encrypt(message, des_key)
+        elif algorithm == 'DES (Library)':
+            if SESSION_DES_KEY is None:
+                raise ValueError('DES (Library) için önce RSA ile oturum anahtarı değişimi yapılmalı.')
+            encrypted = des_lib_encrypt(message, SESSION_DES_KEY)
 
-    elif algo == "AES":
-        aes_key = key or SESSION_AES_KEY or ""
-        encrypted = aes_encrypt(message, aes_key)
+        elif algorithm == 'AES (Manual)':
+            if not key:
+                raise ValueError('AES (Manual) için 16 byte anahtar zorunludur.')
+            encrypted = aes_manual_encrypt(message, key)
 
-    elif algo == "RSA":
-        # Kütüphaneli mod: RSA ile mesaj şifreleme (demo)
-        encrypted = rsa_encrypt_text(SERVER_RSA_PUBLIC, message)
+        elif algorithm == 'AES (Library)':
+            if SESSION_AES_KEY is None:
+                raise ValueError('AES (Library) için önce RSA ile oturum anahtarı değişimi yapılmalı.')
+            encrypted = aes_lib_encrypt(message, SESSION_AES_KEY)
 
-    else:
-        encrypted = message
+        elif algorithm == 'RSA':
+            if not RSA_PUBLIC_KEY or not RSA_PRIVATE_KEY:
+                raise ValueError('RSA anahtarları bulunamadı.')
+            encrypted = rsa_encrypt_text(RSA_PUBLIC_KEY, message)
 
-    received_message = encrypted
-    emit('receive_message', {'message': encrypted}, broadcast=True)
+        else:
+            raise ValueError('Geçersiz algoritma seçimi.')
+
+        # Sunucu sayfasında görünmesi için sakla
+        received_message = encrypted
+
+        # Client’a bilgi
+        socketio.emit('message_sent', {'algorithm': algorithm})
+
+        # Server ekranına düşür
+        socketio.emit('receive_message', {'message': encrypted, 'algorithm': algorithm})
+
+    except Exception as e:
+        socketio.emit('error', {'message': str(e)})
 
 
 @socketio.on('decrypt_message')
 def handle_decrypt_message(data):
-    global received_message
+    try:
+        encrypted_message = data.get('message', '')
+        algorithm = data.get('algorithm') or data.get('algo')
+        key = data.get('key')
 
-    algo = data['algo']
-    key = data.get('key', '')
+        if not algorithm:
+            raise ValueError("Algoritma seçimi yok.")
+        if not encrypted_message:
+            raise ValueError("Şifreli mesaj boş.")
 
-    if algo == "Caesar":
-        decrypted = caesar_decrypt(received_message)
+        if algorithm == 'Caesar':
+            if key is None or key == '':
+                raise ValueError('Caesar için anahtar zorunludur.')
+            decrypted = caesar_decrypt(encrypted_message, int(key))
 
-    elif algo == "Vigenere":
-        decrypted = vigenere_decrypt(received_message, key)
+        elif algorithm == 'Vigenere':
+            if not key:
+                raise ValueError('Vigenere için anahtar zorunludur.')
+            decrypted = vigenere_decrypt(encrypted_message, key)
 
-    elif algo == "Substitution":
-        decrypted = substitution_decrypt(received_message, key)
+        elif algorithm == 'Substitution':
+            if not key:
+                raise ValueError('Substitution için anahtar zorunludur.')
+            decrypted = substitution_decrypt(encrypted_message, key)
 
-    elif algo == "Affine":
-        decrypted = affine_decrypt(received_message)
+        elif algorithm == 'Affine':
+            if not key:
+                raise ValueError('Affine için anahtar zorunludur. Örn: 5,8')
+            a, b = map(int, key.split(','))
+            decrypted = affine_decrypt(encrypted_message, a, b)
 
-    elif algo == "Rail Fence":
-        rails = int(key) if key.isdigit() and int(key) >= 2 else 3
-        decrypted = rail_fence_decrypt(received_message, rails)
+        elif algorithm == 'Rail Fence':
+            if not key:
+                raise ValueError('Rail Fence için anahtar zorunludur.')
+            decrypted = rail_fence_decrypt(encrypted_message, int(key))
 
-    elif algo == "Route Cipher":
-        width = int(key) if key.isdigit() and int(key) >= 2 else 5
-        decrypted = route_decrypt(received_message, width=width)
+        elif algorithm == 'Route Cipher':
+            if not key:
+                raise ValueError('Route Cipher için anahtar zorunludur.')
+            decrypted = route_decrypt(encrypted_message, key)
 
-    elif algo == "Columnar Transposition":
-        decrypted = columnar_decrypt(received_message, key if key else "truva")
+        elif algorithm == 'Columnar Transposition':
+            if not key:
+                raise ValueError('Columnar Transposition için anahtar zorunludur.')
+            decrypted = columnar_decrypt(encrypted_message, key)
 
-    elif algo == "Polybius":
-        decrypted = polybius_decrypt(received_message)
+        elif algorithm == 'Polybius':
+            if not key:
+                raise ValueError('Polybius için anahtar zorunludur.')
+            decrypted = polybius_decrypt(encrypted_message, key)
 
-    elif algo == "Pigpen":
-        decrypted = pigpen_decrypt(received_message)
+        elif algorithm == 'Pigpen':
+            decrypted = pigpen_decrypt(encrypted_message)
 
-    elif algo == "Hill":
-        key_matrix = parse_hill_key(key) if key else [[3, 3], [2, 5]]
-        decrypted = hill_decrypt(received_message, key_matrix)
+        elif algorithm == 'Hill':
+            if not key:
+                raise ValueError('Hill için anahtar matrisi zorunludur.')
+            key_matrix = ast.literal_eval(key)
+            decrypted = hill_decrypt(encrypted_message, key_matrix)
 
-    elif algo == "DES":
-        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
-        decrypted = des_decrypt(received_message, des_key)
+        elif algorithm == 'DES (Manual)':
+            if not key:
+                raise ValueError('DES (Manual) için 8 byte anahtar zorunludur.')
+            decrypted = des_decrypt(encrypted_message, key)
 
-    elif algo == "DES (Library)":
-        des_key = (key or SESSION_DES_KEY or "12345678")[:8]
-        decrypted = des_lib_decrypt(received_message, des_key)
+        elif algorithm == 'DES (Library)':
+            if SESSION_DES_KEY is None:
+                raise ValueError('DES (Library) için önce RSA ile oturum anahtarı değişimi yapılmalı.')
+            decrypted = des_lib_decrypt(encrypted_message, SESSION_DES_KEY)
 
-    elif algo == "AES":
-        aes_key = key or SESSION_AES_KEY or ""
-        decrypted = aes_decrypt(received_message, aes_key)
+        elif algorithm == 'AES (Manual)':
+            if not key:
+                raise ValueError('AES (Manual) için 16 byte anahtar zorunludur.')
+            decrypted = aes_manual_decrypt(encrypted_message, key)
 
-    elif algo == "RSA":
-        decrypted = rsa_decrypt_text(SERVER_RSA_PRIVATE, received_message)
+        elif algorithm == 'AES (Library)':
+            if SESSION_AES_KEY is None:
+                raise ValueError('AES (Library) için önce RSA ile oturum anahtarı değişimi yapılmalı.')
+            decrypted = aes_lib_decrypt(encrypted_message, SESSION_AES_KEY)
 
-    else:
-        decrypted = received_message
+        elif algorithm == 'RSA':
+            decrypted = rsa_decrypt_text(RSA_PRIVATE_KEY, encrypted_message)
 
-    emit('receive_decrypted', {'decrypted': decrypted}, broadcast=True)
+        else:
+            raise ValueError('Geçersiz algoritma.')
+
+        socketio.emit('message_decrypted', {'decrypted': decrypted})
+
+    except Exception as e:
+        socketio.emit('error', {'message': str(e)})
 
 
 if __name__ == '__main__':

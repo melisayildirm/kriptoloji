@@ -572,6 +572,22 @@ def pigpen_decrypt(text):
     return ''.join(result)
 
 
+
+# --- Key validation helpers (ASSIGNMENT REQUIREMENTS) ---
+def _require_exact_len_str(key: str, n: int, algo_name: str) -> str:
+    if key is None:
+        raise ValueError(f"{algo_name} için anahtar zorunludur.")
+    if len(key) != n:
+        raise ValueError(f"{algo_name} anahtarı tam olarak {n} byte/karakter olmalıdır.")
+    return key
+
+def _require_exact_len_bytes(key: bytes, n: int, algo_name: str) -> bytes:
+    if key is None:
+        raise ValueError(f"{algo_name} için anahtar zorunludur.")
+    if len(key) != n:
+        raise ValueError(f"{algo_name} anahtarı tam olarak {n} byte olmalıdır.")
+    return key
+
 # --- 10. Hill Cipher ---
 def _clean_text_to_numbers(text):
     """Metni A=0..Z=25 sayısına çevirir, harf olmayanları atar."""
@@ -920,7 +936,7 @@ def des_encrypt(text, key):
         Şifrelenmiş metin (hex formatında)
     """
     # Anahtarı 8 karaktere tamamla
-    key = key[:8].ljust(8, '\0')
+    key = _require_exact_len_str(key, 8, 'DES (Manual)')
     
     # Anahtarı bit dizisine çevir
     key_bits = _text_to_bits(key)
@@ -984,7 +1000,7 @@ def des_decrypt(ciphertext_hex, key):
         Çözülmüş metin
     """
     # Anahtarı 8 karaktere tamamla
-    key = key[:8].ljust(8, '\0')
+    key = _require_exact_len_str(key, 8, 'DES (Manual)')
     
     # Anahtarı bit dizisine çevir
     key_bits = _text_to_bits(key)
@@ -1048,8 +1064,9 @@ def _derive_aes_key(key: str) -> bytes:
     return h[:16]  # AES-128
 
 
-def aes_encrypt(plaintext: str, key: str) -> str:
-    aes_key = _derive_aes_key(key)
+def aes_user_encrypt(plaintext: str, key: str) -> str:
+    key = _require_exact_len_str(key, 16, 'AES')
+    aes_key = key.encode('utf-8')
     iv = get_random_bytes(16)
 
     cipher = AES.new(aes_key, AES.MODE_CBC, iv)
@@ -1058,29 +1075,48 @@ def aes_encrypt(plaintext: str, key: str) -> str:
     return base64.b64encode(iv + ciphertext).decode("utf-8")
 
 
-def aes_decrypt(ciphertext: str, key: str) -> str:
+def aes_user_decrypt(ciphertext: str, key: str) -> str:
     raw = base64.b64decode(ciphertext)
     iv = raw[:16]
     data = raw[16:]
 
-    aes_key = _derive_aes_key(key)
+    key = _require_exact_len_str(key, 16, 'AES')
+    aes_key = key.encode('utf-8')
     cipher = AES.new(aes_key, AES.MODE_CBC, iv)
 
     plaintext = unpad(cipher.decrypt(data), AES.block_size)
     return plaintext.decode("utf-8")
 
+# --- AES-128 (Library) CBC + Base64 ---
+# Not: Bu modda anahtar kullanıcıdan alınmaz; RSA ile (base64 olarak) iletilen 16-byte key kullanılır.
+def aes_lib_encrypt(plaintext: str, key_bytes: bytes) -> str:
+    k = _require_exact_len_bytes(key_bytes, 16, "AES-128 (Library)")
+    iv = get_random_bytes(16)
+    cipher = AES.new(k, AES.MODE_CBC, iv)
+    ct = cipher.encrypt(pad(plaintext.encode("utf-8"), AES.block_size))
+    return base64.b64encode(iv + ct).decode("utf-8")
+
+def aes_lib_decrypt(ciphertext_b64: str, key_bytes: bytes) -> str:
+    k = _require_exact_len_bytes(key_bytes, 16, "AES-128 (Library)")
+    raw = base64.b64decode(ciphertext_b64)
+    iv, ct = raw[:16], raw[16:]
+    cipher = AES.new(k, AES.MODE_CBC, iv)
+    pt = unpad(cipher.decrypt(ct), AES.block_size)
+    return pt.decode("utf-8")
+
 # --- DES (Library) CBC + Base64 ---
-def des_lib_encrypt(plaintext: str, key: str) -> str:
-    k = (key or "12345678").encode("utf-8")[:8].ljust(8, b"\0")
+# Not: Bu modda anahtar kullanıcıdan alınmaz; RSA ile (base64 olarak) iletilen 8-byte key kullanılır.
+def des_lib_encrypt(plaintext: str, key_bytes: bytes) -> str:
+    k = _require_exact_len_bytes(key_bytes, 8, "DES (Library)")
     iv = get_random_bytes(8)
     cipher = DES.new(k, DES.MODE_CBC, iv)
     ct = cipher.encrypt(pad(plaintext.encode("utf-8"), 8))
     return base64.b64encode(iv + ct).decode("utf-8")
 
-def des_lib_decrypt(ciphertext_b64: str, key: str) -> str:
+def des_lib_decrypt(ciphertext_b64: str, key_bytes: bytes) -> str:
+    k = _require_exact_len_bytes(key_bytes, 8, "DES (Library)")
     raw = base64.b64decode(ciphertext_b64)
     iv, ct = raw[:8], raw[8:]
-    k = (key or "12345678").encode("utf-8")[:8].ljust(8, b"\0")
     cipher = DES.new(k, DES.MODE_CBC, iv)
     pt = unpad(cipher.decrypt(ct), 8)
     return pt.decode("utf-8")
@@ -1106,9 +1142,6 @@ def rsa_decrypt_text(private_pem: str, ciphertext_b64: str) -> str:
     pt = cipher.decrypt(ct)
     return pt.decode("utf-8")
 
-# ===============================
-# MANUAL / TOY AES (SIMPLIFIED)
-# ===============================
 
 # 4-bit S-Box (Mini AES)
 S_BOX = {
@@ -1133,6 +1166,7 @@ def aes_manual_encrypt(plaintext: str, key: str) -> str:
     """
     Toy AES (2 round, simplified)
     """
+    key = _require_exact_len_str(key, 16, 'AES (Manual)')
     data = plaintext.encode("utf-8")
     key_bytes = key.encode("utf-8").ljust(len(data), b"\0")
 
@@ -1147,6 +1181,7 @@ def aes_manual_encrypt(plaintext: str, key: str) -> str:
     return base64.b64encode(state).decode("utf-8")
 
 def aes_manual_decrypt(ciphertext_b64: str, key: str) -> str:
+    key = _require_exact_len_str(key, 16, 'AES (Manual)')
     data = base64.b64decode(ciphertext_b64)
     key_bytes = key.encode("utf-8").ljust(len(data), b"\0")
 

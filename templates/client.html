@@ -10,17 +10,17 @@
 <body>
     <div class="container">
         <h2>İstemci (Mesaj Gönder)</h2>
+
         <label>Mesaj:</label>
         <input type="text" id="message">
-        
-        <label>Anahtar:</label>
-        <input type="text" id="key" placeholder="Vigenere/Substitution: anahtar kelime, Rail Fence: ray sayısı (örn: 3), Route Cipher: genişlik (örn: 5), Columnar Transposition: anahtar (örn: truva), Hill: matris (örn: 3,3,2,5), DES: 8 karakterlik anahtar (örn: 12345678)">
 
-        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-            <button type="button" onclick="exchangeKey('AES')">RSA ile AES Anahtarı Gönder</button>
-            <button type="button" onclick="exchangeKey('DES')">RSA ile DES Anahtarı Gönder</button>
-        </div>
-        
+        <label>Anahtar:</label>
+        <input
+            type="text"
+            id="key"
+            placeholder="Manuel modlar: DES (Manual)=8 karakter, AES (Manual)=16 karakter. Diğerleri kendi anahtar formatına göre."
+        >
+
         <label>Algoritma:</label>
         <select id="algo">
             <option value="Caesar">Caesar</option>
@@ -33,74 +33,140 @@
             <option value="Polybius">Polybius</option>
             <option value="Pigpen">Pigpen</option>
             <option value="Hill">Hill</option>
-            <option value="DES">DES</option>
+
+            <option value="DES (Manual)">DES (Manual)</option>
             <option value="DES (Library)">DES (Library)</option>
-            <option value="RSA">RSA</option>
-            <option value="AES">AES</option>
+
             <option value="AES (Manual)">AES (Manual)</option>
+            <option value="AES (Library)">AES (Library)</option>
+
+            <option value="RSA">RSA</option>
         </select>
 
         <button onclick="sendMessage()">Şifrele ve Gönder</button>
-        <div class="encrypted" id="encrypted"></div>
-        
+
+        <!-- Client tarafında şifreli mesajı göstermiyoruz -->
+        <div class="encrypted" id="status"></div>
+
         <a href="/" class="back-home-btn">Ana Sayfaya Dön</a>
     </div>
 
     <script>
         const socket = io();
 
-        // --- RSA key exchange helpers ---
         let rsaPublicKeyPem = null;
 
+        // Library modda RSA key exchange sonrası gönderilecek payload
+        let pendingSendPayload = null;
+
+        // RSA public key iste
         socket.emit('get_rsa_public_key');
         socket.on('rsa_public_key', (data) => {
             rsaPublicKeyPem = data.public_key;
         });
 
+        // Server key exchange OK dönerse -> bekleyen mesajı gönder
         socket.on('key_exchange_ok', (data) => {
-            if (data.ok) {
-                alert(data.algo + " anahtarı sunucuya iletildi (RSA ile).");
+            if (data && data.ok) {
+                document.getElementById('status').innerText = "Oturum anahtarı alındı. Mesaj gönderiliyor...";
+
+                if (pendingSendPayload) {
+                    socket.emit('send_message', pendingSendPayload);
+                    pendingSendPayload = null;
+                }
             } else {
-                alert("Anahtar iletimi başarısız.");
+                alert("Anahtar iletimi başarısız: " + (data && data.message ? data.message : ""));
+                document.getElementById('status').innerText = "";
+                pendingSendPayload = null;
             }
         });
 
-        function exchangeKey(algo) {
-            if (!rsaPublicKeyPem) return alert("RSA public key henüz gelmedi!");
-            const key = document.getElementById('key').value;
+        // Server hata event’i (send/decrypt/key exchange vs)
+        socket.on('error', (data) => {
+            alert("Hata: " + (data && data.message ? data.message : "Bilinmeyen hata"));
+        });
 
-            if (algo === "AES" && key.length < 16) {
-                return alert("AES için en az 16 karakterlik anahtar gir (16 byte mantığında).");
+        // Mesaj gönderiminden sonra client sadece "Mesaj Gönderildi!" yazar
+        socket.on('message_sent', (data) => {
+            document.getElementById('status').innerText = "Mesaj Gönderildi!";
+        });
+
+        function randomAsciiKey(len) {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            let out = "";
+            for (let i = 0; i < len; i++) {
+                out += chars.charAt(Math.floor(Math.random() * chars.length));
             }
-            if (algo === "DES" && key.length < 8) {
-                return alert("DES için en az 8 karakterlik anahtar gir.");
+            return out;
+        }
+
+        function validateKeyAndEncrypt() {
+            const key = document.getElementById('key').value.trim();
+            const algo = document.getElementById('algo').value;
+
+            // Manual modlarda anahtar zorunlu
+            if ((algo === "AES (Manual)" || algo === "DES (Manual)") && !key) {
+                alert("Anahtar girmeniz gerekmektedir!");
+                return false;
             }
 
-            try {
-                const publicKey = forge.pki.publicKeyFromPem(rsaPublicKeyPem);
-                // OAEP (SHA-1) -> Python'daki PKCS1_OAEP default ile uyumlu
-                const encryptedBytes = publicKey.encrypt(key, 'RSA-OAEP');
-                const encryptedB64 = forge.util.encode64(encryptedBytes);
-
-                socket.emit('exchange_session_key', {
-                    algo: algo,
-                    encrypted_key: encryptedB64
-                });
-            } catch (e) {
-                console.error(e);
-                alert("RSA şifreleme hatası: console'a bak.");
+            // Manual anahtar uzunluğu kontrolü
+            if (algo === "AES (Manual)" && key.length !== 16) {
+                alert("AES (Manual) için anahtar tam 16 karakter olmalı.");
+                return false;
             }
+            if (algo === "DES (Manual)" && key.length !== 8) {
+                alert("DES (Manual) için anahtar tam 8 karakter olmalı.");
+                return false;
+            }
+
+            // Diğer anahtarlı algoritmalar (isteğe bağlı)
+            const needsKey = ["Caesar","Vigenere","Substitution","Affine","Rail Fence","Route Cipher","Columnar Transposition","Polybius","Hill","DES (Manual)","AES (Manual)"];
+            if (needsKey.includes(algo) && !key) {
+                alert("Bu algoritma için anahtar zorunlu.");
+                return false;
+            }
+
+            return true;
         }
 
         function sendMessage() {
-            const message = document.getElementById('message').value;
-            const key = document.getElementById('key').value;
+            const message = document.getElementById('message').value.trim();
+            const key = document.getElementById('key').value.trim();
             const algo = document.getElementById('algo').value;
 
             if (!message) return alert("Mesaj boş olamaz!");
 
-            socket.emit('send_message', {message, key, algo});
-            document.getElementById('encrypted').innerText = "Mesaj Gönderildi!";
+            if (!validateKeyAndEncrypt()) return;
+
+            // Library mod: RSA ile session key üret & gönder, sonra mesajı gönder
+            if (algo === "AES (Library)" || algo === "DES (Library)") {
+                if (!rsaPublicKeyPem) return alert("RSA public key henüz gelmedi!");
+
+                const keyLen = (algo === "AES (Library)") ? 16 : 8;
+                const sessionKeyText = randomAsciiKey(keyLen);
+
+                const publicKey = forge.pki.publicKeyFromPem(rsaPublicKeyPem);
+                const encryptedKeyBytes = publicKey.encrypt(sessionKeyText, 'RSA-OAEP');
+                const encryptedKeyB64 = forge.util.encode64(encryptedKeyBytes);
+
+                // Mesajı exchange sonrası göndereceğiz (key alanı boş!)
+                pendingSendPayload = { message: message, algorithm: algo, key: "" };
+
+                socket.emit('exchange_session_key', {
+                    algorithm: algo,
+                    encrypted_key: encryptedKeyB64
+                });
+
+                document.getElementById('status').innerText = "Oturum anahtarı gönderiliyor...";
+                document.getElementById('message').value = "";
+                return;
+            }
+
+            // Manual/klasik mod: direkt gönder (key ile)
+            socket.emit('send_message', { message: message, algorithm: algo, key: key });
+
+            document.getElementById('status').innerText = "Mesaj Gönderildi!";
             document.getElementById('message').value = "";
         }
     </script>
