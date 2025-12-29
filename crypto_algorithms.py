@@ -1194,3 +1194,4 @@ def aes_manual_decrypt(ciphertext_b64: str, key: str) -> str:
     state = _xor_bytes(state, key_bytes)
 
     return state.decode("utf-8", errors="ignore")
+

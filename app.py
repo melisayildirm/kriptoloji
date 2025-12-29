@@ -3,7 +3,8 @@ from flask_socketio import SocketIO, emit
 from crypto_algorithms import *
 import math
 import ast
-import base64  # (kalsın, başka yerde kullanıyor olabilirsin)
+import base64  # kalsın (başka yerde kullanıyor olabilirsin)
+
 from crypto_algorithms import (
     aes_user_encrypt, aes_user_decrypt,
     aes_lib_encrypt, aes_lib_decrypt,
@@ -17,6 +18,7 @@ from crypto_algorithms import (
 aes_encrypt = aes_user_encrypt
 aes_decrypt = aes_user_decrypt
 
+# RSA (genel RSA algoritması için)
 RSA_PUBLIC_KEY, RSA_PRIVATE_KEY = rsa_generate_keypair()
 
 app = Flask(__name__)
@@ -25,7 +27,7 @@ socketio = SocketIO(app)
 
 received_message = ""
 
-# RSA keypair (server)
+# RSA keypair (server) - Library modlarda oturum anahtarı değişimi için
 SERVER_RSA_PUBLIC, SERVER_RSA_PRIVATE = rsa_generate_keypair(2048)
 
 # Session keys distributed via RSA (Library modlar için)
@@ -45,7 +47,21 @@ def parse_hill_key(key_string):
             raise ValueError("Anahtar matrisi kare olmalı (4 veya 9 eleman)")
         return [[numbers[i * n + j] for j in range(n)] for i in range(n)]
     except:
+        # default 2x2 (det=9, 26 ile terslenebilir)
         return [[3, 3], [2, 5]]
+
+
+def _file_algo_guard(is_file: bool, algorithm: str):
+    """
+    Dosya içeriğini base64 string olarak taşıyoruz (+/= içerir).
+    Klasik şifreler base64'i bozabilir.
+    Bu yüzden dosya modunda sadece AES/DES (Manual/Library) ve RSA desteklenir.
+    """
+    if not is_file:
+        return
+    allowed = {"AES (Manual)", "AES (Library)", "DES (Manual)", "DES (Library)", "RSA"}
+    if algorithm not in allowed:
+        raise ValueError("Dosya şifreleme sadece AES/DES (Manual/Library) ve RSA ile destekleniyor.")
 
 
 @app.route('/')
@@ -81,7 +97,6 @@ def handle_exchange_session_key(data):
         if not algorithm or not encrypted_key_b64:
             raise ValueError("exchange_session_key verisi eksik (algorithm/encrypted_key).")
 
-        # ✅ Client artık base64 değil, direkt ASCII key string gönderiyor (DES=8, AES=16)
         key_text = rsa_decrypt_text(SERVER_RSA_PRIVATE, encrypted_key_b64)
 
         if isinstance(key_text, (bytes, bytearray)):
@@ -102,7 +117,6 @@ def handle_exchange_session_key(data):
         else:
             raise ValueError('Bilinmeyen algoritma için oturum anahtarı gönderildi.')
 
-        # Client tarafı key_exchange_ok dinliyor
         socketio.emit('key_exchange_ok', {'ok': True, 'algorithm': algorithm})
 
     except Exception as e:
@@ -112,8 +126,15 @@ def handle_exchange_session_key(data):
 
 @socketio.on('send_message')
 def handle_send_message(data):
+    """Client -> Server: Mesaj/Dosya şifrele ve server ekranına düşür."""
     global received_message
     try:
+        # ---- DOSYA MODU ----
+        is_file = bool(data.get('is_file', False))
+        file_name = data.get('file_name') or 'dosya.bin'
+        file_b64 = data.get('file_b64')  # base64 string
+
+        # ---- METİN MODU ----
         message = data.get('message', '')
         algorithm = data.get('algorithm') or data.get('algo')
         key = data.get('key')
@@ -121,94 +142,103 @@ def handle_send_message(data):
         if not algorithm:
             raise ValueError("Algoritma seçimi yok.")
 
-        # Manuel / klasik şifreler
+        if is_file and not file_b64:
+            raise ValueError("Dosya modu için file_b64 boş olamaz.")
+
+        _file_algo_guard(is_file, algorithm)
+        plaintext = file_b64 if is_file else message
+
+        # ========== ŞİFRELEME ==========
         if algorithm == 'Caesar':
             if key is None or key == '':
                 raise ValueError('Caesar için anahtar (kaydırma sayısı) zorunludur.')
-            encrypted = caesar_encrypt(message, int(key))
+            encrypted = caesar_encrypt(plaintext, int(key))
 
         elif algorithm == 'Vigenere':
             if not key:
                 raise ValueError('Vigenere için anahtar kelime zorunludur.')
-            encrypted = vigenere_encrypt(message, key)
+            encrypted = vigenere_encrypt(plaintext, key)
 
         elif algorithm == 'Substitution':
             if not key:
                 raise ValueError('Substitution için anahtar kelime zorunludur.')
-            encrypted = substitution_encrypt(message, key)
+            encrypted = substitution_encrypt(plaintext, key)
 
         elif algorithm == 'Affine':
             if not key:
                 raise ValueError('Affine için anahtar zorunludur. Örn: 5,8')
             a, b = map(int, key.split(','))
-            encrypted = affine_encrypt(message, a, b)
+            encrypted = affine_encrypt(plaintext, a, b)
 
         elif algorithm == 'Rail Fence':
             if not key:
                 raise ValueError('Rail Fence için ray sayısı zorunludur.')
-            encrypted = rail_fence_encrypt(message, int(key))
+            encrypted = rail_fence_encrypt(plaintext, int(key))
 
         elif algorithm == 'Route Cipher':
             if not key:
                 raise ValueError('Route Cipher için anahtar zorunludur.')
-            encrypted = route_encrypt(message, key)
+            encrypted = route_encrypt(plaintext, key)
 
         elif algorithm == 'Columnar Transposition':
             if not key:
                 raise ValueError('Columnar Transposition için anahtar zorunludur.')
-            encrypted = columnar_encrypt(message, key)
+            encrypted = columnar_encrypt(plaintext, key)
 
         elif algorithm == 'Polybius':
             if not key:
                 raise ValueError('Polybius için anahtar zorunludur.')
-            encrypted = polybius_encrypt(message, key)
+            encrypted = polybius_encrypt(plaintext, key)
 
         elif algorithm == 'Pigpen':
-            encrypted = pigpen_encrypt(message)
+            encrypted = pigpen_encrypt(plaintext)
 
         elif algorithm == 'Hill':
             if not key:
-                raise ValueError('Hill için anahtar matrisi zorunludur. Örn: [2,2,3,3]')
-            key_matrix = ast.literal_eval(key)
-            encrypted = hill_encrypt(message, key_matrix)
+                raise ValueError('Hill için anahtar matrisi zorunludur. Örn: 3,3,2,5 veya [[3,3],[2,5]]')
+            if "[" in str(key):
+                key_matrix = ast.literal_eval(key)
+            else:
+                key_matrix = parse_hill_key(str(key))
+            encrypted = hill_encrypt(plaintext, key_matrix)
 
-        # --- DES / AES MODLARI ---
+        # --- DES / AES ---
         elif algorithm == 'DES (Manual)':
             if not key:
                 raise ValueError('DES (Manual) için 8 byte anahtar zorunludur.')
-            encrypted = des_encrypt(message, key)
+            encrypted = des_encrypt(plaintext, key)
 
         elif algorithm == 'DES (Library)':
             if SESSION_DES_KEY is None:
                 raise ValueError('DES (Library) için önce RSA ile oturum anahtarı değişimi yapılmalı.')
-            encrypted = des_lib_encrypt(message, SESSION_DES_KEY)
+            encrypted = des_lib_encrypt(plaintext, SESSION_DES_KEY)
 
         elif algorithm == 'AES (Manual)':
             if not key:
                 raise ValueError('AES (Manual) için 16 byte anahtar zorunludur.')
-            encrypted = aes_manual_encrypt(message, key)
+            encrypted = aes_manual_encrypt(plaintext, key)
 
         elif algorithm == 'AES (Library)':
             if SESSION_AES_KEY is None:
                 raise ValueError('AES (Library) için önce RSA ile oturum anahtarı değişimi yapılmalı.')
-            encrypted = aes_lib_encrypt(message, SESSION_AES_KEY)
+            encrypted = aes_lib_encrypt(plaintext, SESSION_AES_KEY)
 
         elif algorithm == 'RSA':
-            if not RSA_PUBLIC_KEY or not RSA_PRIVATE_KEY:
-                raise ValueError('RSA anahtarları bulunamadı.')
-            encrypted = rsa_encrypt_text(RSA_PUBLIC_KEY, message)
+            encrypted = rsa_encrypt_text(RSA_PUBLIC_KEY, plaintext)
 
         else:
-            raise ValueError('Geçersiz algoritma seçimi.')
+            raise ValueError('Geçersiz algoritma.')
 
-        # Sunucu sayfasında görünmesi için sakla
+        # Server sayfasında görünmesi için sakla
         received_message = encrypted
 
-        # Client’a bilgi
         socketio.emit('message_sent', {'algorithm': algorithm})
-
-        # Server ekranına düşür
-        socketio.emit('receive_message', {'message': encrypted, 'algorithm': algorithm})
+        socketio.emit('receive_message', {
+            'message': encrypted,
+            'algorithm': algorithm,
+            'is_file': is_file,
+            'file_name': file_name
+        })
 
     except Exception as e:
         socketio.emit('error', {'message': str(e)})
@@ -216,16 +246,24 @@ def handle_send_message(data):
 
 @socketio.on('decrypt_message')
 def handle_decrypt_message(data):
+    """Server tarafında: Şifreli mesaj/dosya çöz."""
     try:
         encrypted_message = data.get('message', '')
         algorithm = data.get('algorithm') or data.get('algo')
         key = data.get('key')
+
+        # ---- DOSYA MODU META ----
+        is_file = bool(data.get('is_file', False))
+        file_name = data.get('file_name') or 'dosya.bin'
 
         if not algorithm:
             raise ValueError("Algoritma seçimi yok.")
         if not encrypted_message:
             raise ValueError("Şifreli mesaj boş.")
 
+        _file_algo_guard(is_file, algorithm)
+
+        # ========== DEŞİFRE ==========
         if algorithm == 'Caesar':
             if key is None or key == '':
                 raise ValueError('Caesar için anahtar zorunludur.')
@@ -272,8 +310,11 @@ def handle_decrypt_message(data):
 
         elif algorithm == 'Hill':
             if not key:
-                raise ValueError('Hill için anahtar matrisi zorunludur.')
-            key_matrix = ast.literal_eval(key)
+                raise ValueError('Hill için anahtar matrisi zorunludur. Örn: 3,3,2,5 veya [[3,3],[2,5]]')
+            if "[" in str(key):
+                key_matrix = ast.literal_eval(key)
+            else:
+                key_matrix = parse_hill_key(str(key))
             decrypted = hill_decrypt(encrypted_message, key_matrix)
 
         elif algorithm == 'DES (Manual)':
@@ -302,7 +343,15 @@ def handle_decrypt_message(data):
         else:
             raise ValueError('Geçersiz algoritma.')
 
-        socketio.emit('message_decrypted', {'decrypted': decrypted})
+        # Dosya ise decrypted = base64 string döner
+        if is_file:
+            socketio.emit('message_decrypted', {
+                'is_file': True,
+                'file_name': file_name,
+                'file_b64': decrypted
+            })
+        else:
+            socketio.emit('message_decrypted', {'decrypted': decrypted})
 
     except Exception as e:
         socketio.emit('error', {'message': str(e)})

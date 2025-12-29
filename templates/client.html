@@ -14,7 +14,18 @@
         <label>Mesaj:</label>
         <input type="text" id="message">
 
-        <label>Anahtar:</label>
+        <hr style="margin:16px 0; opacity:0.3;">
+        <h3 style="margin:0 0 8px 0;">Dosya Şifreleme</h3>
+        <label>Dosya Seç (her tür):</label>
+        <input type="file" id="binFileInput">
+        <div class="encrypted" id="binFileStatus"></div>
+
+        <div style="margin-top:8px;">
+            <button type="button" id="downloadEncJsonClient" style="display:none;">Şifreli Dosyayı JSON indir</button>
+            <button type="button" id="downloadEncTxtClient" style="display:none; margin-left:8px;">Şifreli Dosyayı TXT indir</button>
+        </div>
+
+        <label style="margin-top:12px;">Anahtar:</label>
         <input
             type="text"
             id="key"
@@ -43,9 +54,8 @@
             <option value="RSA">RSA</option>
         </select>
 
-        <button onclick="sendMessage()">Şifrele ve Gönder</button>
+        <button type="button" onclick="sendMessage()">Şifrele ve Gönder</button>
 
-        <!-- Client tarafında şifreli mesajı göstermiyoruz -->
         <div class="encrypted" id="status"></div>
 
         <a href="/" class="back-home-btn">Ana Sayfaya Dön</a>
@@ -54,9 +64,111 @@
     <script>
         const socket = io();
 
-        let rsaPublicKeyPem = null;
+        // ===== DOSYA (client) =====
+        let selectedBinFileB64 = null;
+        let selectedBinFileName = null;
 
-        // Library modda RSA key exchange sonrası gönderilecek payload
+        document.addEventListener("DOMContentLoaded", () => {
+            const binInput = document.getElementById("binFileInput");
+            const status = document.getElementById("binFileStatus");
+
+            if (binInput) {
+                binInput.addEventListener("change", async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+
+                    selectedBinFileName = f.name;
+
+                    const buf = await f.arrayBuffer();
+                    const bytes = new Uint8Array(buf);
+
+                    // ArrayBuffer -> base64
+                    let binary = "";
+                    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                    selectedBinFileB64 = btoa(binary);
+
+                    if (status) status.innerText = `Seçildi: ${selectedBinFileName} (${bytes.length} byte)`;
+
+                    // yeni dosya seçilince eski şifreli çıktı butonlarını kapat
+                    hideDownloadButtons();
+                });
+            }
+
+            // download butonları
+            const bj = document.getElementById("downloadEncJsonClient");
+            const bt = document.getElementById("downloadEncTxtClient");
+            if (bj) bj.addEventListener("click", downloadEncJsonClient);
+            if (bt) bt.addEventListener("click", downloadEncTxtClient);
+        });
+
+        function isFileMode() {
+            return !!selectedBinFileB64;
+        }
+
+        function fileAlgoAllowed(algo) {
+            return ["AES (Manual)","AES (Library)","DES (Manual)","DES (Library)","RSA"].includes(algo);
+        }
+        // ==========================
+
+        // ===== Client'ta şifreli dosyayı indirmek için =====
+        let lastEncIsFile = false;
+        let lastEncFileName = "dosya.bin";
+        let lastEncAlgorithm = null;
+        let lastEncCiphertext = null;
+
+        function safeAlgoSlug(algo) {
+            return (algo || "ENC").replace(/[^a-zA-Z0-9]+/g, "_");
+        }
+
+        function showDownloadButtons(show) {
+            const bj = document.getElementById("downloadEncJsonClient");
+            const bt = document.getElementById("downloadEncTxtClient");
+            if (bj) bj.style.display = show ? "inline-block" : "none";
+            if (bt) bt.style.display = show ? "inline-block" : "none";
+        }
+
+        function hideDownloadButtons() {
+            showDownloadButtons(false);
+            lastEncIsFile = false;
+            lastEncCiphertext = null;
+        }
+
+        function downloadEncJsonClient() {
+            if (!lastEncCiphertext) return alert("İndirilecek şifreli dosya yok.");
+            const pack = {
+                is_file: true,
+                file_name: lastEncFileName || "dosya.bin",
+                algorithm: lastEncAlgorithm || document.getElementById("algo").value,
+                ciphertext: lastEncCiphertext
+            };
+            const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${pack.file_name}.${safeAlgoSlug(pack.algorithm)}.enc.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadEncTxtClient() {
+            if (!lastEncCiphertext) return alert("İndirilecek şifreli içerik yok.");
+            const algo = lastEncAlgorithm || document.getElementById("algo").value;
+            const name = lastEncFileName || "dosya.bin";
+            const blob = new Blob([lastEncCiphertext], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${name}.${safeAlgoSlug(algo)}.enc.txt`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+        // ================================================
+
+        let rsaPublicKeyPem = null;
         let pendingSendPayload = null;
 
         // RSA public key iste
@@ -65,10 +177,9 @@
             rsaPublicKeyPem = data.public_key;
         });
 
-        // Server key exchange OK dönerse -> bekleyen mesajı gönder
         socket.on('key_exchange_ok', (data) => {
             if (data && data.ok) {
-                document.getElementById('status').innerText = "Oturum anahtarı alındı. Mesaj gönderiliyor...";
+                document.getElementById('status').innerText = "Oturum anahtarı alındı. Gönderiliyor...";
 
                 if (pendingSendPayload) {
                     socket.emit('send_message', pendingSendPayload);
@@ -81,14 +192,27 @@
             }
         });
 
-        // Server hata event’i (send/decrypt/key exchange vs)
         socket.on('error', (data) => {
             alert("Hata: " + (data && data.message ? data.message : "Bilinmeyen hata"));
         });
 
-        // Mesaj gönderiminden sonra client sadece "Mesaj Gönderildi!" yazar
-        socket.on('message_sent', (data) => {
-            document.getElementById('status').innerText = "Mesaj Gönderildi!";
+        // Şifreli çıktı server'dan dönünce burada yakalayıp client'ta indirilebilir yapıyoruz
+        socket.on('receive_message', (data) => {
+            const st = document.getElementById('status');
+
+            if (data && data.message) {
+                if (data.is_file) {
+                    lastEncIsFile = true;
+                    lastEncFileName = data.file_name || "dosya.bin";
+                    lastEncAlgorithm = data.algorithm || document.getElementById("algo").value;
+                    lastEncCiphertext = data.message;
+
+                    if (st) st.innerText = `Şifreli dosya hazır: ${lastEncFileName} (İndirebilirsin)`;
+                    showDownloadButtons(true);
+                } else {
+                    if (st) st.innerText = "Şifreli mesaj server'a ulaştı.";
+                }
+            }
         });
 
         function randomAsciiKey(len) {
@@ -110,7 +234,6 @@
                 return false;
             }
 
-            // Manual anahtar uzunluğu kontrolü
             if (algo === "AES (Manual)" && key.length !== 16) {
                 alert("AES (Manual) için anahtar tam 16 karakter olmalı.");
                 return false;
@@ -120,7 +243,6 @@
                 return false;
             }
 
-            // Diğer anahtarlı algoritmalar (isteğe bağlı)
             const needsKey = ["Caesar","Vigenere","Substitution","Affine","Rail Fence","Route Cipher","Columnar Transposition","Polybius","Hill","DES (Manual)","AES (Manual)"];
             if (needsKey.includes(algo) && !key) {
                 alert("Bu algoritma için anahtar zorunlu.");
@@ -135,11 +257,20 @@
             const key = document.getElementById('key').value.trim();
             const algo = document.getElementById('algo').value;
 
-            if (!message) return alert("Mesaj boş olamaz!");
+            const fileMode = isFileMode();
 
+            if (fileMode && !fileAlgoAllowed(algo)) {
+                return alert("Dosya şifreleme sadece AES/DES (Manual/Library) ve RSA ile destekleniyor.");
+            }
+
+            if (!fileMode && !message) return alert("Mesaj boş olamaz!");
+            if (fileMode && !selectedBinFileB64) return alert("Dosya seçmedin!");
             if (!validateKeyAndEncrypt()) return;
 
-            // Library mod: RSA ile session key üret & gönder, sonra mesajı gönder
+            // yeni gönderimde eski download butonları kapansın
+            hideDownloadButtons();
+
+            // Library mod: RSA ile session key üret & gönder, sonra payload'ı gönder
             if (algo === "AES (Library)" || algo === "DES (Library)") {
                 if (!rsaPublicKeyPem) return alert("RSA public key henüz gelmedi!");
 
@@ -150,8 +281,9 @@
                 const encryptedKeyBytes = publicKey.encrypt(sessionKeyText, 'RSA-OAEP');
                 const encryptedKeyB64 = forge.util.encode64(encryptedKeyBytes);
 
-                // Mesajı exchange sonrası göndereceğiz (key alanı boş!)
-                pendingSendPayload = { message: message, algorithm: algo, key: "" };
+                pendingSendPayload = fileMode
+                    ? { is_file: true, file_name: selectedBinFileName, file_b64: selectedBinFileB64, message: "", algorithm: algo, key: "" }
+                    : { message: message, algorithm: algo, key: "" };
 
                 socket.emit('exchange_session_key', {
                     algorithm: algo,
@@ -163,10 +295,13 @@
                 return;
             }
 
-            // Manual/klasik mod: direkt gönder (key ile)
-            socket.emit('send_message', { message: message, algorithm: algo, key: key });
+            const payload = fileMode
+                ? { is_file: true, file_name: selectedBinFileName, file_b64: selectedBinFileB64, message: "", algorithm: algo, key: key }
+                : { message: message, algorithm: algo, key: key };
 
-            document.getElementById('status').innerText = "Mesaj Gönderildi!";
+            socket.emit('send_message', payload);
+
+            document.getElementById('status').innerText = fileMode ? "Dosya şifrelendi ve gönderildi! (Şifreli çıktı bekleniyor...)" : "Mesaj gönderildi!";
             document.getElementById('message').value = "";
         }
     </script>

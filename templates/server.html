@@ -46,23 +46,145 @@
 
         <div class="decrypted" id="decrypted"></div>
 
+        <hr style="margin:16px 0; opacity:0.3;">
+        <h3 style="margin:0 0 8px 0;">Dosya İşlemleri (Yükle → Çöz)</h3>
+
+        <label>Şifreli Dosya Yükle (.enc.json veya .enc.txt):</label>
+        <input type="file" id="encFileUpload" accept=".json,.txt">
+        <div class="encrypted" id="encUploadStatus"></div>
+
+        <label>Orijinal Dosya Adı (TXT yükleme için opsiyonel):</label>
+        <input type="text" id="origName" placeholder="örn: notlar.txt">
+
+        <button type="button" id="downloadDecryptedBtn" style="display:none; margin-top:8px;">Deşifre Dosyasını İndir</button>
+
         <a href="/" class="back-home-btn">Ana Sayfaya Dön</a>
     </div>
 
     <script>
         const socket = io();
 
+        // ===== DOSYA MODU (server) =====
+        let lastIsFile = false;
+        let lastFileName = "dosya.bin";
+        let lastDecryptedFileB64 = null;
+
         const receivedDiv = document.getElementById('received');
         const decryptedDiv = document.getElementById('decrypted');
 
-        // Client mesaj gönderince server'a düşen şifreli mesaj buraya gelir
+        function downloadDecryptedFile() {
+            if (!lastDecryptedFileB64) {
+                alert("Deşifre edilmiş dosya yok.");
+                return;
+            }
+            const binary = atob(lastDecryptedFileB64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+            const blob = new Blob([bytes]);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = lastFileName || "dosya.bin";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function showDecButton(show) {
+            const decBtn = document.getElementById("downloadDecryptedBtn");
+            if (decBtn) decBtn.style.display = show ? "inline-block" : "none";
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            const decBtn = document.getElementById("downloadDecryptedBtn");
+            if (decBtn) decBtn.addEventListener("click", downloadDecryptedFile);
+
+            const up = document.getElementById("encFileUpload");
+            const st = document.getElementById("encUploadStatus");
+
+            if (up) {
+                up.addEventListener("change", async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+
+                    try {
+                        const text = await f.text();
+
+                        // JSON ise: metadata + ciphertext var
+                        if (f.name.toLowerCase().endsWith(".json")) {
+                            const obj = JSON.parse(text);
+                            if (!obj || !obj.ciphertext) throw new Error("JSON içinde ciphertext yok.");
+
+                            lastIsFile = true;
+                            lastFileName = obj.file_name || "dosya.bin";
+
+                            // ciphertext UI'ya bas
+                            receivedDiv.innerText = (obj.ciphertext || "").trim();
+
+                            // algoritmayı JSON'dan ayarla (varsa)
+                            const algoSel = document.getElementById("algo");
+                            if (algoSel && obj.algorithm) algoSel.value = obj.algorithm;
+
+                            if (st) st.innerText = `Yüklendi: ${f.name} | Orijinal: ${lastFileName}`;
+
+                            lastDecryptedFileB64 = null;
+                            decryptedDiv.innerText = "";
+                            showDecButton(false);
+                            return;
+                        }
+
+                        // TXT ise: sadece ciphertext
+                        const cipher = text.trim();
+                        if (!cipher) throw new Error("TXT boş görünüyor.");
+
+                        lastIsFile = true;
+                        receivedDiv.innerText = cipher;
+
+                        // TXT yüklemede dosya adı inputtan (opsiyonel)
+                        const nameInput = document.getElementById("origName");
+                        lastFileName = (nameInput && nameInput.value.trim())
+                            ? nameInput.value.trim()
+                            : "dosya.bin";
+
+                        if (st) st.innerText = `TXT yüklendi: ${f.name} | Çözünce adı: ${lastFileName}`;
+
+                        lastDecryptedFileB64 = null;
+                        decryptedDiv.innerText = "";
+                        showDecButton(false);
+
+                    } catch (err) {
+                        alert("Şifreli dosya okunamadı: " + err.message);
+                    }
+                });
+            }
+        });
+
+        // Client mesaj/dosya gönderirse server ekranına da düşebilir
         socket.on('receive_message', (data) => {
-            receivedDiv.innerText = data.message || "";
+            receivedDiv.innerText = (data && data.message) ? data.message : "";
             decryptedDiv.innerText = "";
+
+            lastIsFile = !!(data && data.is_file);
+            lastFileName = (data && data.file_name) ? data.file_name : "dosya.bin";
+
+            lastDecryptedFileB64 = null;
+            showDecButton(false);
         });
 
         socket.on('message_decrypted', (data) => {
-            decryptedDiv.innerText = data.decrypted ?? "";
+            if (data && data.is_file) {
+                lastIsFile = true;
+                lastFileName = data.file_name || lastFileName || "dosya.bin";
+                lastDecryptedFileB64 = data.file_b64;
+
+                decryptedDiv.innerText = `Dosya çözüldü: ${lastFileName}`;
+                showDecButton(true);
+            } else {
+                decryptedDiv.innerText = (data && (data.decrypted ?? "")) || "";
+                showDecButton(false);
+            }
         });
 
         socket.on('error', (data) => {
@@ -75,13 +197,19 @@
             const encrypted = receivedDiv.innerText.trim();
 
             if (!encrypted) {
-                alert("Gelen şifreli mesaj boş!");
+                alert("Gelen şifreli mesaj/dosya boş!");
                 return;
             }
 
             // Library modlarda key kullanıcıdan alınmıyor (session key server'da kayıtlı)
             if (algo === "AES (Library)" || algo === "DES (Library)" || algo === "RSA") {
-                socket.emit('decrypt_message', { message: encrypted, algorithm: algo, key: "" });
+                socket.emit('decrypt_message', {
+                    message: encrypted,
+                    algorithm: algo,
+                    key: "",
+                    is_file: lastIsFile,
+                    file_name: lastFileName
+                });
                 return;
             }
 
@@ -95,7 +223,6 @@
                 return;
             }
 
-            // Anahtar gerektiren algoritmalar
             const needsKey = [
                 "Caesar","Vigenere","Substitution","Affine","Rail Fence","Route Cipher",
                 "Columnar Transposition","Polybius","Hill","DES (Manual)","AES (Manual)"
@@ -106,7 +233,13 @@
                 return;
             }
 
-            socket.emit('decrypt_message', { message: encrypted, algorithm: algo, key: key });
+            socket.emit('decrypt_message', {
+                message: encrypted,
+                algorithm: algo,
+                key: key,
+                is_file: lastIsFile,
+                file_name: lastFileName
+            });
         }
     </script>
 </body>
